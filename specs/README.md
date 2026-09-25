@@ -5,8 +5,8 @@ Cada spec debe referenciar los requisitos `A-xx` que cubre y recibir aprobación
 | Spec                             | Estado                                        |
 | -------------------------------- | --------------------------------------------- |
 | S-01 Fundación y entornos        | Aprobada e implementada en su alcance técnico |
-| S-02 Autenticación y sesiones    | Borrador pendiente de aprobación              |
-| S-03 Usuarios y admin            | Pendiente                                     |
+| S-02 Autenticación y sesiones    | Aprobada e implementada en su alcance técnico |
+| S-03 Usuarios y admin            | Aprobada e implementada en su alcance técnico |
 | S-04 Audios y R2                 | Pendiente                                     |
 | S-05 Autoevaluación y borradores | Pendiente                                     |
 | S-06 Panel de evaluaciones       | Pendiente                                     |

@@ -9,6 +9,7 @@
   },
   "vars": {
     "APP_ENV": "local",
+    "APP_ORIGIN": "http://127.0.0.1:5173",
   },
   "d1_databases": [
     {
@@ -28,6 +29,7 @@
       "name": "escuchando-mivoz-preview",
       "vars": {
         "APP_ENV": "preview",
+        "APP_ORIGIN": "https://escuchando-mivoz-preview.workers.dev",
       },
       "d1_databases": [
         {
@@ -47,6 +49,7 @@
       "name": "escuchando-mivoz",
       "vars": {
         "APP_ENV": "production",
+        "APP_ORIGIN": "https://escuchando-mivoz.workers.dev",
       },
       "d1_databases": [
         {

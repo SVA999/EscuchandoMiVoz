@@ -1,4 +1,5 @@
 import { Link, Outlet, Route, Routes } from 'react-router-dom'
+import { AdminVocalistas } from './AdminVocalistas'
 
 function Inicio() {
   return (
@@ -50,6 +51,7 @@ export function App() {
       <Route element={<Layout />}>
         <Route index element={<Inicio />} />
         <Route path="estado" element={<Estado />} />
+        <Route path="admin/vocalistas" element={<AdminVocalistas />} />
       </Route>
     </Routes>
   )

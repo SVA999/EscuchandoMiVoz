@@ -16,7 +16,9 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate",
-    "db:migrate:local": "wrangler d1 migrations apply DB --local"
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "auth:bootstrap-admin": "node tools/auth-admin.ts bootstrap",
+    "auth:reset-admin": "node tools/auth-admin.ts reset"
   },
   "keywords": [],
   "author": "",

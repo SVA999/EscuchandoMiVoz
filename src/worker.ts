@@ -1,8 +1,8 @@
 import { Hono } from 'hono'
 import { api } from './api'
-import type { Env } from './config/env'
+import type { AppEnv } from './auth/session'
 
-const app = new Hono<{ Bindings: Env }>().route('/api', api)
+const app = new Hono<AppEnv>().route('/api', api)
 
 app.notFound((context) => context.json({ error: 'Ruta no encontrada' }, 404))
 

@@ -4,7 +4,7 @@ Aplicación web interna del Ministerio de Alabanza para escuchar audios propios 
 
 ## Estado
 
-S-01, Fundación y entornos, está aprobada e implementada parcialmente como esqueleto técnico. No contiene autenticación, usuarios reales, carga de MP3, reproducción ni evaluaciones.
+S-01, Fundación y entornos, S-02, Autenticación y sesiones, y S-03, Usuarios y admin, están aprobadas e implementadas en su alcance técnico. No contiene gestión de audios, reproducción ni evaluaciones.
 
 ## Requisitos locales
 

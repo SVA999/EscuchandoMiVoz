@@ -1,6 +1,6 @@
 # S-02 — Autenticación y sesiones
 
-> **Estado:** PENDIENTE DE APROBACIÓN — no autoriza escribir código, migraciones ni infraestructura ejecutable.
+> **Estado:** APROBADA — autoriza implementar exclusivamente el alcance de esta spec.
 > **Versión:** 0.1.0
 > **SSOT de referencia:** `SSOT.md` v1.0.0
 > **Cubre:** A-14, A-15, A-16, A-17, A-18, A-26, A-27, A-28, A-29, A-30
@@ -98,7 +98,7 @@ El reemplazo de contraseña y la desactivación de una cuenta deberán invalidar
 
 ### 5.5 Bootstrap del admin
 
-El sistema debe crear exactamente una cuenta `admin` con nombre visible **Ministerio de Alabanza**, de forma idempotente y sin contraseña versionada. El mecanismo concreto queda bloqueado hasta responder Q-S02-01 a Q-S02-04.
+El sistema debe crear exactamente una cuenta `admin` con nombre visible **Ministerio de Alabanza**, mediante una herramienta local administrativa ejecutada por Santiago Viana contra D1 de producción. La herramienta solicita la contraseña de forma interactiva y oculta, falla si ya existe una cuenta admin activa y nunca expone ni guarda la contraseña fuera del hash almacenado en D1.
 
 ## 6. Contratos API propuestos
 
@@ -121,7 +121,7 @@ Los contratos siguientes son propuesta de S-02 y se vuelven definitivos solo des
 {
   "usuario": {
     "id": "id-opaco",
-    "nombreVisible": "texto",
+    "nombreUsuario": "username_normalized",
     "rol": "admin"
   }
 }
@@ -129,15 +129,40 @@ Los contratos siguientes son propuesta de S-02 y se vuelven definitivos solo des
 
 La respuesta no incluye contraseña, hash, token, identificador de sesión, secreto, estado interno ni datos de otros usuarios.
 
-**Error neutral propuesto:** `401` con:
+**Error neutral definitivo:** `401` con:
 
 ```json
 {
-  "error": "No fue posible iniciar sesión. Verifica tus credenciales."
+  "error": {
+    "codigo": "CREDENCIALES_INVALIDAS",
+    "mensaje": "Usuario o contraseña incorrectos."
+  }
 }
 ```
 
-Las respuestas por cuenta inexistente, contraseña incorrecta o cuenta inactiva no deben permitir distinguir la causa. El estado HTTP y el texto final quedan sujetos a Q-S02-12.
+Las respuestas por cuenta inexistente, contraseña incorrecta o cuenta inactiva son idénticas.
+
+Durante el bloqueo por rate limit responde `429`:
+
+```json
+{
+  "error": {
+    "codigo": "DEMASIADOS_INTENTOS",
+    "mensaje": "Has realizado demasiados intentos. Intenta nuevamente en unos minutos."
+  }
+}
+```
+
+Si D1 no está disponible para consultar o actualizar el rate limit, responde `503`:
+
+```json
+{
+  "error": {
+    "codigo": "SERVICIO_NO_DISPONIBLE",
+    "mensaje": "No fue posible iniciar sesión en este momento. Intenta nuevamente más tarde."
+  }
+}
+```
 
 ### `GET /api/auth/me`
 
@@ -154,7 +179,8 @@ Las respuestas por cuenta inexistente, contraseña incorrecta o cuenta inactiva 
 ### Rutas no autenticadas y protegidas
 
 - `POST /api/auth/login` es público con limitación de intentos.
-- `GET /api/auth/me` y `POST /api/auth/logout` requieren o toleran sesión según el contrato anterior.
+- `GET /api/auth/me` requiere una sesión válida.
+- `POST /api/auth/logout` es idempotente y responde `204` incluso sin sesión válida.
 - No se agregarán endpoints de usuarios, admin, audio, evaluaciones o borradores en S-02.
 - Las rutas futuras deberán rechazar por defecto la ausencia de contexto autenticado y comprobar el rol en el Worker.
 
@@ -166,11 +192,16 @@ Campos mínimos propuestos:
 
 - `id`: identificador interno no derivado del nombre de usuario.
 - `username_normalized`: identificador único para autenticación, sin distinguir mayúsculas/minúsculas.
-- `display_name`: nombre visible.
 - `role`: `admin` o `vocalista`.
 - `password_hash`: hash adaptativo con sal; nunca contraseña plana.
-- `is_active`: estado de acceso.
+- `password_salt`: salt aleatorio de la contraseña.
+- `password_algorithm`: algoritmo de hash.
+- `password_parameters`: iteraciones y parámetros codificados.
+- `status`: estado de acceso.
 - `created_at` y `updated_at`.
+- `password_changed_at` y `deactivated_at`.
+
+`display_name` y datos de presentación se agregarán en S-03.
 
 Las reglas definitivas del nombre de usuario, el identificador, el estado del admin y los campos adicionales quedan sujetas a Q-S02-05 y Q-S02-06.
 
@@ -195,62 +226,76 @@ Restricciones propuestas:
 - Las consultas de autenticación filtran usuario activo, no vencido y no revocado.
 - El reemplazo de contraseña y la desactivación invalidan las sesiones requeridas de forma transaccional.
 
+El rate limit tendrá una entidad separada con el identificador hash de la combinación IP + usuario normalizado, contador de fallos, inicio de ventana, bloqueo hasta y fechas de creación/actualización. La IP cruda no se persiste.
+
+Los eventos mínimos de autenticación tendrán una entidad separada con tipo, actor/objetivo cuando ya sean conocidos, fecha UTC, contexto técnico mínimo y correlación temporal opcional. Se retienen 90 días.
+
 S-02 no crea tablas de audios, preguntas, borradores, evaluaciones ni respuestas.
 
 ## 8. Validaciones y errores
 
-- El nombre de usuario es obligatorio y se normaliza sin alterar el valor visible.
+- El nombre de usuario es obligatorio, se recorta, se convierte a minúsculas y debe cumplir `^[a-z0-9-]{3,40}$`.
 - La contraseña es obligatoria y no se devuelve ni se registra.
 - Las contraseñas nuevas deben cumplir mínimo 6 caracteres; S-02 no implementa la pantalla que las establece.
 - JSON inválido, campos desconocidos o tipos incorrectos reciben un error español estable sin detalles técnicos.
 - Nunca se devuelven SQL, stack traces, nombres de bindings, hashes, tokens ni mensajes crudos de Cloudflare.
 - Sesión ausente, inválida, vencida, revocada o asociada a usuario inactivo se trata como no autenticada.
 - El rate limit responde de forma neutral y no confirma existencia de una cuenta.
+- Las solicitudes mutables validan `Origin`; si falta o no coincide exactamente con el origen del entorno, responden `403`.
+- No se permite CORS ni `OPTIONS` para orígenes externos.
 
 ## 9. Seguridad
 
 - El token de sesión se genera con una fuente criptográficamente segura y con longitud suficiente; no se deriva de usuario, hora ni contraseña.
 - D1 almacena únicamente el hash del token.
-- La cookie será `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/` y usará prefijo `__Host-` en production si la decisión de entorno lo confirma.
+- Production y preview usan `__Host-escuchando-mi-propia-voz-session` con `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, sin `Domain` y duración renovable de 30 días. Local usa `escuchando-mi-propia-voz-session` y solo activa `Secure` cuando usa HTTPS.
+- Los hash de contraseña usan PBKDF2-HMAC-SHA-256 mediante Web Crypto, con salt mínimo de 16 bytes y 100.000 iteraciones iniciales; el costo debe medirse en un Worker real antes de producción.
+- El hash de sesión usa SHA-256 del token concatenado con `SESSION_PEPPER`; el pepper es secreto por entorno y su rotación revoca todas las sesiones.
 - No se almacenan credenciales, tokens ni identidad sensible en `localStorage`.
 - Las operaciones mutables usarán la protección CSRF/origen aprobada; `SameSite=Lax` por sí solo no se considerará decisión completa sin resolver Q-S02-16.
 - La comparación de contraseñas será resistente a filtraciones y no permitirá respuestas diferenciadas por existencia de cuenta.
 - Los logs de autenticación no incluirán contraseñas, tokens, hashes ni cuerpos completos de solicitudes.
-- El diseño de limitación de intentos debe funcionar entre instancias y no depender exclusivamente de memoria del Worker.
-- El mecanismo de hash, pepper, rate limit y limpieza de sesiones no añadirá servicios externos sin propuesta y aprobación conforme a A-08 y A-22.
+- El diseño de limitación de intentos se almacena en D1 y no usa memoria del Worker como fuente de verdad ni servicios externos.
+- Si D1 no está disponible para el rate limit, el login se deniega con `503`.
+- La limpieza oportunista de sesiones y eventos no bloquea solicitudes normales y elimina solo registros fuera de sus periodos de retención.
+- No se agregan servicios externos para hash, pepper, rate limit o limpieza.
 
-## 10. Preguntas abiertas bloqueantes
+El identificador persistido del rate limit es un hash de IP + `username_normalized` usando una clave/pepper de aplicación; la IP cruda nunca se guarda. Se permiten 5 fallos en 15 minutos; el sexto activa un bloqueo de 15 minutos y un login exitoso elimina contador y bloqueo.
 
-S-02 no puede aprobarse ni implementarse hasta responder estas decisiones. Las respuestas deben quedar incorporadas en una versión posterior de esta spec.
+Los eventos permitidos son `login_exitoso`, `login_fallido`, `login_bloqueado_rate_limit`, `logout`, `password_reemplazada_admin`, `sesion_revocada_por_cambio_clave`, `sesiones_revocadas_por_desactivacion`, `cuenta_desactivada`, `cuenta_activada` y `restablecimiento_admin_local`. Solo incluyen datos técnicos mínimos, sin contraseñas, hashes, tokens, cookies, IP cruda, audios, respuestas ni el usuario normalizado de intentos no autenticados. Se retienen 90 días.
 
-| ID       | Pregunta                                                                                     | Respuesta requerida                                              |
-| -------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Q-S02-01 | ¿Cuál será el `nombre_usuario` inicial de la cuenta **Ministerio de Alabanza**?              | Texto exacto                                                     |
-| Q-S02-02 | ¿Cómo se crea la cuenta admin inicial?                                                       | Bootstrap operativo, migración controlada u otra opción aprobada |
-| Q-S02-03 | ¿Dónde se entrega/configura la contraseña inicial del admin sin guardarla en Git o logs?     | Procedimiento operativo                                          |
-| Q-S02-04 | ¿Cómo se reemplaza la contraseña del admin si se pierde el acceso al panel?                  | Procedimiento operativo autorizado                               |
-| Q-S02-05 | ¿Se aprueba `username_normalized` como identificador de login y qué caracteres/largo acepta? | Regla exacta                                                     |
-| Q-S02-06 | ¿Qué campos adicionales de `users` son necesarios en S-02 y cuáles se dejan para S-03?       | Lista de campos                                                  |
-| Q-S02-07 | ¿Qué algoritmo y parámetros de hash se aprueban?                                             | Algoritmo, variante y costos; debe ser compatible con Workers    |
-| Q-S02-08 | ¿Se usará `SESSION_PEPPER`?                                                                  | Sí/no; si sí, mezcla, almacenamiento y rotación                  |
-| Q-S02-09 | ¿Cuál será el nombre exacto de la cookie de sesión?                                          | Nombre exacto                                                    |
-| Q-S02-10 | ¿Se usará cookie `__Host-` en production y una excepción controlada para local?              | Sí/no y regla por entorno                                        |
-| Q-S02-11 | ¿Cerrar sesión invalida solo la sesión actual o todas las sesiones del usuario?              | Una opción                                                       |
-| Q-S02-12 | ¿Qué estado HTTP y texto final tendrá el error de credenciales inválidas o cuenta inactiva?  | Contrato exacto                                                  |
-| Q-S02-13 | ¿Reemplazar contraseña invalida todas las sesiones del usuario?                              | Sí/no                                                            |
-| Q-S02-14 | ¿El contrato de logout será `204` idempotente incluso sin sesión?                            | Sí/no y alternativa                                              |
-| Q-S02-15 | ¿Desactivar un vocalista invalida inmediatamente todas sus sesiones?                         | Sí/no                                                            |
-| Q-S02-16 | ¿Qué protección CSRF/origen se aprueba para solicitudes mutables?                            | Token, validación de `Origin`/`Referer`, combinación u otra      |
-| Q-S02-17 | ¿Cuál será el rate limit de login?                                                           | Límite, ventana, clave, bloqueo y respuesta                      |
-| Q-S02-18 | ¿Dónde se almacenará el rate limit?                                                          | D1, mecanismo Cloudflare aprobado u otra opción                  |
-| Q-S02-19 | ¿Qué ocurre si el almacenamiento del rate limit no está disponible?                          | Denegar, degradar controladamente u otra regla                   |
-| Q-S02-20 | ¿Se permitirá CORS?                                                                          | No, o lista exacta de orígenes por entorno                       |
-| Q-S02-21 | ¿Cómo y cuándo se limpiarán sesiones expiradas/revocadas?                                    | Política operativa                                               |
-| Q-S02-22 | ¿Qué eventos mínimos de autenticación pueden registrarse sin datos sensibles?                | Lista de eventos y retención                                     |
+## 10. Decisiones resueltas
+
+Las preguntas bloqueantes fueron respondidas por Santiago Viana. Estas decisiones quedan incorporadas a S-02 y deben respetarse durante la implementación.
+
+| ID       | Decisión                                                                                                                                                                                                                                                                                                 |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q-S02-01 | El usuario inicial es `ministerio-alabanza`. El identificador se normaliza a minúsculas, sin espacios externos, y acepta solo `a-z`, `0-9` y `-`, con longitud de 3 a 40 caracteres.                                                                                                                     |
+| Q-S02-02 | Bootstrap local controlado contra D1 de producción; no se usa migración con contraseña, endpoint público, seed versionado ni GitHub Actions. Falla si ya existe un admin activo.                                                                                                                         |
+| Q-S02-03 | La contraseña inicial se introduce oculta en terminal, sin argumento, archivo, log, Git ni GitHub Actions. El hash se genera localmente.                                                                                                                                                                 |
+| Q-S02-04 | El restablecimiento del admin se ejecuta mediante herramienta local, solicita una nueva contraseña oculta, actualiza solo el admin e invalida todas sus sesiones. No hay recuperación web, correo ni contraseña maestra.                                                                                 |
+| Q-S02-05 | Se aprueba `username_normalized` como identificador técnico único, con la regla de normalización y caracteres indicada en Q-S02-01.                                                                                                                                                                      |
+| Q-S02-06 | S-02 usa `id`, `role`, `username_normalized`, datos de contraseña, `status`, fechas de creación/actualización, `password_changed_at` y `deactivated_at`. `display_name` y datos de presentación quedan para S-03.                                                                                        |
+| Q-S02-07 | Se usará PBKDF2-HMAC-SHA-256 mediante Web Crypto, hash derivado de 256 bits, salt aleatorio mínimo de 16 bytes y 100.000 iteraciones iniciales. El formato guarda algoritmo, iteraciones, salt y hash; se permitirá aumentar iteraciones. Debe medirse en un Worker real antes de fijarlo en producción. |
+| Q-S02-08 | Se usará `SESSION_PEPPER` solo para `SHA-256(token + SESSION_PEPPER)`. Será secreto independiente por entorno; rotarlo invalida todas las sesiones. No se usa para contraseñas.                                                                                                                          |
+| Q-S02-09 | Cookie de producción/preview: `__Host-escuchando-mi-propia-voz-session`.                                                                                                                                                                                                                                 |
+| Q-S02-10 | Production/preview usan `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, sin `Domain` y con duración renovable de 30 días. Local usa `escuchando-mi-propia-voz-session`; `Secure` solo con HTTPS y sin prefijo `__Host-` en localhost.                                                                    |
+| Q-S02-11 | Logout invalida únicamente la sesión actual.                                                                                                                                                                                                                                                             |
+| Q-S02-12 | Credenciales inválidas o cuenta inactiva responden `401` con `{ "error": { "codigo": "CREDENCIALES_INVALIDAS", "mensaje": "Usuario o contraseña incorrectos." } }`.                                                                                                                                      |
+| Q-S02-13 | Reemplazar una contraseña invalida inmediatamente todas las sesiones activas del usuario.                                                                                                                                                                                                                |
+| Q-S02-14 | Logout es `POST /api/auth/logout`, idempotente, responde `204` incluso sin cookie o con sesión inválida.                                                                                                                                                                                                 |
+| Q-S02-15 | Desactivar un vocalista invalida inmediatamente todas sus sesiones activas.                                                                                                                                                                                                                              |
+| Q-S02-16 | Solicitudes `POST`, `PUT`, `PATCH` y `DELETE` validan `Origin` contra el origen exacto del entorno. Origin ausente o inválido responde `403`; no se usa token CSRF separado. No se permite CORS sin una nueva decisión aprobada.                                                                         |
+| Q-S02-17 | Rate limit: 5 intentos fallidos en 15 minutos por hash de IP + `username_normalized`; el sexto intento fallido bloquea 15 minutos. Un login exitoso elimina contador y bloqueo. El bloqueo responde `429` con código `DEMASIADOS_INTENTOS` y mensaje neutral.                                            |
+| Q-S02-18 | El rate limit se almacena en D1; no se usan KV, Durable Objects, Rate Limiting Binding, CAPTCHA ni servicios externos. No se guarda IP cruda.                                                                                                                                                            |
+| Q-S02-19 | Si D1 o el almacenamiento del rate limit no está disponible, se deniega el login con `503`, código `SERVICIO_NO_DISPONIBLE` y mensaje neutral.                                                                                                                                                           |
+| Q-S02-20 | No se permite CORS. SPA y API usan el mismo origen; no se envían `Access-Control-Allow-Origin` ni se habilita `OPTIONS` externo.                                                                                                                                                                         |
+| Q-S02-21 | Limpieza oportunista limitada a una vez al día por entorno; elimina sesiones vencidas/revocadas de más de 30 días sin bloquear solicitudes. Se documenta revisión manual mensual.                                                                                                                        |
+| Q-S02-22 | Se permiten eventos mínimos de autenticación sin secretos ni IP cruda, con retención de 90 días y limpieza diaria oportunista; se documenta revisión mensual.                                                                                                                                            |
 
 ## 11. Criterios de aceptación
 
-S-02 se considerará implementada solo si, después de aprobar las preguntas abiertas, se cumple todo lo siguiente:
+S-02 se considerará implementada solo si, después de la aprobación formal de esta spec, se cumple todo lo siguiente:
 
 1. Solo existen los roles `admin` y `vocalista`, y la cuenta admin es única. [A-14, A-15]
 2. Las credenciales nunca se almacenan ni se transmiten en texto plano fuera de la solicitud HTTPS. [A-26]
@@ -272,12 +317,13 @@ S-02 se considerará implementada solo si, después de aprobar las preguntas abi
 ### Unitarias
 
 - Normalización y validación del nombre de usuario.
-- Hash y verificación de contraseña, incluyendo rechazo de contraseñas menores de 6 caracteres.
+- Hash y verificación PBKDF2-HMAC-SHA-256, incluyendo rechazo de contraseñas menores de 6 caracteres.
 - Generación de token y hash no reversible.
 - Cálculo de vencimiento de 30 días y renovación por actividad.
 - Rechazo de sesiones vencidas, revocadas o asociadas a usuario inactivo.
 - Mensajes y contratos neutrales de error.
-- Rate limit: ventana, umbral, bloqueo y liberación.
+- Rate limit en D1: ventana, umbral, bloqueo, liberación y hash de correlación sin IP cruda.
+- Validación estricta de `Origin` y ausencia de CORS.
 
 ### Integración
 
@@ -288,6 +334,8 @@ S-02 se considerará implementada solo si, después de aprobar las preguntas abi
 - Renovación concurrente no acorta ni duplica incorrectamente la sesión.
 - Cambio de contraseña y desactivación invalidan sesiones según la decisión aprobada.
 - La migración contiene únicamente las entidades de S-02 y sus restricciones.
+- D1 no disponible para rate limit deniega el login con `503`.
+- Limpieza oportunista no elimina sesiones vigentes ni bloquea solicitudes normales.
 
 ### E2E
 
@@ -297,25 +345,31 @@ S-02 se considerará implementada solo si, después de aprobar las preguntas abi
 - Cierre de sesión y reutilización de una sesión revocada.
 - Expiración simulada o controlada de sesión.
 - Límite de intentos de login.
+- Rechazo de solicitudes mutables con `Origin` ausente o no permitido.
+- Ausencia de cabeceras CORS y rechazo de `OPTIONS` externo.
 - Un usuario no autenticado no alcanza una ruta protegida.
 - Un vocalista autenticado no obtiene contexto de admin alterando URL, cuerpo o estado del frontend.
 
-## 13. Preguntas de implementación posteriores a la aprobación
+## 13. Decisiones operativas que deben documentarse al implementar
 
-Una vez respondidas las preguntas bloqueantes y aprobada S-02, se deberá actualizar esta spec con:
+Una vez aprobada S-02, la implementación deberá documentar:
 
 - Diagrama o descripción del flujo de sesión decidido.
 - Esquema Drizzle y migración revisable.
 - Contratos definitivos de errores y cookies.
-- Procedimiento de bootstrap y operación del admin.
+- Herramientas locales de bootstrap y restablecimiento del admin, sin incluir contraseñas.
+- Medición del costo de 100.000 iteraciones PBKDF2 en un Worker real antes de production.
+- Procedimiento para rotar `SESSION_PEPPER` e invalidar sesiones.
+- Tarea de limpieza oportunista diaria y revisión manual mensual.
+- Catálogo y retención de eventos de autenticación.
 - Matriz de autorización transversal para S-03 y specs posteriores.
 - Evidencia de pruebas y referencias de tareas, ramas y commits con IDs A-xx.
 
-Hasta entonces, no se deben crear tablas, endpoints de autenticación, cookies, hashes, rate limiting ni secretos operativos.
+La implementación no puede ampliar el alcance hacia usuarios, panel, audio o evaluaciones.
 
 ## 14. Aprobación requerida
 
-Después de resolver Q-S02-01 a Q-S02-22, Santiago Viana debe aprobar esta versión o una versión posterior con la frase:
+Con Q-S02-01 a Q-S02-22 resueltas, Santiago Viana debe aprobar esta versión con la frase:
 
 > **Apruebo S-02 Autenticación y sesiones v0.1.0**
 

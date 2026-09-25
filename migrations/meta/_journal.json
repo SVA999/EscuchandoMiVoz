@@ -1,1 +1,20 @@
-{ "version": "7", "dialect": "sqlite", "entries": [] }
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1790313148037,
+      "tag": "0000_unique_mach_iv",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790317011360,
+      "tag": "0001_eminent_the_initiative",
+      "breakpoints": true
+    }
+  ]
+}
