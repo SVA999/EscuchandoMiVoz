@@ -1,0 +1,66 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "escuchando-mivoz",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-24",
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+  },
+  "vars": {
+    "APP_ENV": "local",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "db-escuchando-mivoz-local",
+      "database_id": "CONFIGURE_LOCAL_DATABASE_ID",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "AUDIO_BUCKET",
+      "bucket_name": "escuchando-mivoz-local",
+    },
+  ],
+  "env": {
+    "preview": {
+      "name": "escuchando-mivoz-preview",
+      "vars": {
+        "APP_ENV": "preview",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "db-escuchando-mivoz-preview",
+          "database_id": "CONFIGURE_PREVIEW_DATABASE_ID",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "AUDIO_BUCKET",
+          "bucket_name": "escuchando-mivoz-preview",
+        },
+      ],
+    },
+    "production": {
+      "name": "escuchando-mivoz",
+      "vars": {
+        "APP_ENV": "production",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "db-escuchando-mivoz",
+          "database_id": "CONFIGURE_PRODUCTION_DATABASE_ID",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "AUDIO_BUCKET",
+          "bucket_name": "escuchando-mivoz",
+        },
+      ],
+    },
+  },
+}
